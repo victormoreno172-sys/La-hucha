@@ -172,8 +172,10 @@ main{max-width:720px;margin:0 auto;padding:0 max(4vw,14px) 40px}
     <div class="card tip hidden" id="tip"><p id="tipTxt"></p><button class="x" id="tipX" aria-label="Cerrar">✕</button></div>
     <div class="card">
       <h3>Anotar</h3>
-      <div class="seg" id="typeSel"><button data-t="out" aria-pressed="true">Gasto</button><button data-t="in" aria-pressed="false">Ingreso</button></div>
+      <div class="seg" id="typeSel"><button data-t="out" aria-pressed="true">Gasto</button><button data-t="in" aria-pressed="false">Ingreso</button><button data-t="mov" aria-pressed="false">Ahorros</button></div>
       <div class="amt"><input id="amt" inputmode="decimal" placeholder="0,00" aria-label="Cantidad pagada" autocomplete="off"><span>€</span></div>
+      <div id="inFields" class="hidden" style="margin-top:12px"><span class="lbl" style="margin-top:0">¿Dónde lo metes?</span><div class="seg" id="destSel"><button data-dest="cuenta" aria-pressed="true">A la cuenta</button><button data-dest="ahorro" aria-pressed="false">A mis ahorros</button></div><p class="help" id="destHelp"></p></div>
+      <div id="movFields" class="hidden" style="margin-top:12px"><div class="seg" id="dirSel"><button data-dir="out" aria-pressed="true">Meter en ahorros</button><button data-dir="in" aria-pressed="false">Sacar de ahorros</button></div><p class="help" id="dirHelp"></p></div>
       <div id="outFields">
         <div class="g2" style="margin-top:12px"><input class="inp" id="prod" list="dlP" placeholder="¿Qué? (agua, tabaco, gasolina…)" maxlength="40" autocomplete="off"><input class="inp num" id="qty" inputmode="decimal" placeholder="Uds." aria-label="Unidades" autocomplete="off"></div>
         <div class="phint" id="pHint"></div>
@@ -201,7 +203,7 @@ main{max-width:720px;margin:0 auto;padding:0 max(4vw,14px) 40px}
   </section>
 
   <section id="v-hist" class="hidden">
-    <div class="card"><h3>Lo que has ahorrado</h3><div class="sum" id="histSum"></div></div>
+    <div class="card"><h3>Tus ahorros</h3><div class="sum" id="histSum"></div><p class="help" id="histHelp"></p></div>
     <div class="card hist"><h3>Mes a mes</h3><div id="histRows"></div><p class="help">La barra es lo ahorrado frente a tu objetivo. Verde: lo cumpliste.</p></div>
   </section>
 
@@ -215,6 +217,9 @@ main{max-width:720px;margin:0 auto;padding:0 max(4vw,14px) 40px}
       <h3>Tu dinero cada mes</h3>
       <label class="lbl" for="ajIncome">Lo que cobras al mes (neto)</label>
       <input class="inp num" id="ajIncome" inputmode="decimal" placeholder="Ej. 1.400">
+      <label class="lbl" for="ajIni">Lo que ya tienes ahorrado ahora</label>
+      <input class="inp num" id="ajIni" inputmode="decimal" placeholder="Ej. 1.000">
+      <p class="help">Es el punto de partida de tu hucha de ahorros. No cuenta para gastar.</p>
       <label class="lbl" for="ajSave">Lo que quieres ahorrar al mes</label>
       <input class="inp num" id="ajSave" inputmode="decimal" placeholder="Ej. 200">
       <p class="help" id="saveHint"></p>
@@ -286,7 +291,7 @@ const shortDate=d=>new Date(d+'T12:00').toLocaleDateString('es-ES',{day:'numeric
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 
 const DEF=()=>({income:0,save:0,fixed:[],plazos:[],budgets:{}});
-let st={settings:DEF(),months:{},mk:curMk(),tab:'hoy',type:'out',cat:'super',selDay:null,moreCats:false};
+let st={settings:DEF(),months:{},mk:curMk(),tab:'hoy',type:'out',dest:'cuenta',dir:'out',cat:'super',selDay:null,moreCats:false};
 let toastT;
 
 /* ---- guardado en el móvil ---- */
@@ -310,7 +315,10 @@ function calc(mk){
   const tISO=todayISO(),tMk=mkOf(tISO);
   const status=mk===tMk?'now':mk<tMk?'past':'future';
   const d=status==='now'?+tISO.slice(8):status==='past'?D:0;
-  const extra=items.filter(i=>i.t==='in').reduce((a,i)=>a+i.a,0);
+  const extra=items.filter(i=>i.t==='in'&&i.to!=='ahorro').reduce((a,i)=>a+i.a,0)+items.filter(i=>i.t==='mov'&&i.dir==='in').reduce((a,i)=>a+i.a,0);
+  const movOut=items.filter(i=>i.t==='mov'&&i.dir==='out').reduce((a,i)=>a+i.a,0);
+  const movIn=items.filter(i=>i.t==='mov'&&i.dir==='in').reduce((a,i)=>a+i.a,0);
+  const deposits=items.filter(i=>i.t==='in'&&i.to==='ahorro').reduce((a,i)=>a+i.a,0);
   const outs=items.filter(i=>i.t==='out');
   const spent=outs.reduce((a,i)=>a+i.a,0);
   const fixedOnly=(s.fixed||[]).reduce((a,f)=>a+(+f.a||0),0);
@@ -318,16 +326,22 @@ function calc(mk){
   const fixed=fixedOnly+plz;
   const income=(+s.income||0)+extra;
   const goal=+s.save||0;
-  const free=income-fixed-goal;
+  const free=income-fixed-goal-movOut;
   const byDay=Array(D+1).fill(0);outs.forEach(i=>byDay[+i.d.slice(8)]+=i.a);
   const before=byDay.slice(1,Math.max(d,1)).reduce((a,b)=>a+b,0);
   const todaySpent=status==='now'?byDay[d]:0;
   const daysLeft=status==='now'?D-d+1:D;
   const allow=status==='now'?(free-before)/daysLeft:free/D;
   const byCat={};outs.forEach(i=>byCat[i.c]=(byCat[i.c]||0)+i.a);
-  const saved=income-fixed-spent;
+  const saved=income-fixed-spent-movOut;
   const first=outs.length?Math.min(...outs.map(i=>+i.d.slice(8))):d;
-  return{first,items,D,d,status,extra,spent,fixedOnly,plz,fixed,income,goal,free,byDay,todaySpent,allow,byCat,saved,left:free-spent};
+  return{movOut,movIn,deposits,first,items,D,d,status,extra,spent,fixedOnly,plz,fixed,income,goal,free,byDay,todaySpent,allow,byCat,saved,left:free-spent};
+}
+function savings(){
+  const tMk=curMk();let past=0,direct=0;
+  for(const k in st.months){const c=calc(k);direct+=c.deposits+c.movOut-c.movIn;if(c.status==='past')past+=c.saved}
+  const ini=+st.settings.ahorroIni||0;
+  return{ini,past,direct,total:ini+past+direct};
 }
 function allItems(){const r=[];for(const k in st.months)for(const i of st.months[k]||[])r.push(i);return r}
 const newer=(a,b)=>b.d.localeCompare(a.d)||(b.id>a.id?1:-1);
@@ -376,19 +390,24 @@ function renderHoy(){
   $('todayList').innerHTML=list.length?list.map(liHTML).join(''):'<li class="empty">Nada anotado todavía.</li>';
 }
 function liHTML(i){
-  const c=i.t==='in'?{n:'Ingreso',c:'#14a06a'}:(CAT[i.c]||CAT.otros);
-  const title=i.p?(i.q>1?fmtIn(i.q)+' × ':'')+i.p:(i.n||c.n);
+  const c=i.t==='mov'?{n:i.dir==='out'?'A tus ahorros':'Sacado de ahorros',c:'#ffcf3f'}:i.t==='in'?{n:i.to==='ahorro'?'Ingreso a ahorros':'Ingreso',c:i.to==='ahorro'?'#ffcf3f':'#14a06a'}:(CAT[i.c]||CAT.otros);
+  const title=i.t==='mov'?(i.n||c.n):i.p?(i.q>1?fmtIn(i.q)+' × ':'')+i.p:(i.n||c.n);
   const extra=[c.n,i.s,new Date(i.d+'T12:00').toLocaleDateString('es-ES',{weekday:'short',day:'numeric'})].filter(Boolean).join(' · ')+(i.q>1?' · '+money(unit(i))+'/ud':'');
-  return `<li><span class="dot" style="background:${c.c}"></span><div><div class="t">${esc(title)}</div><div class="s">${esc(extra)}</div></div><span class="a num ${i.t==='in'?'in':''}">${i.t==='in'?'+':'−'}${money(i.a)}</span><button class="del" data-id="${i.id}" aria-label="Borrar">✕</button></li>`;
+  return `<li><span class="dot" style="background:${c.c}"></span><div><div class="t">${esc(title)}</div><div class="s">${esc(extra)}</div></div><span class="a num ${i.t==='in'||(i.t==='mov'&&i.dir==='in')?'in':''}">${i.t==='mov'?(i.dir==='out'?'→ ':'← '):i.t==='in'?'+':'−'}${money(i.a)}</span><button class="del" data-id="${i.id}" aria-label="Borrar">✕</button></li>`;
 }
 function usage(){const u={};for(const i of allItems())if(i.t==='out')u[i.c]=(u[i.c]||0)+1;return u}
 function renderCatSel(){
-  const isIn=st.type==='in';
-  $('outFields').classList.toggle('hidden',isIn);
+  const isIn=st.type==='in',isMov=st.type==='mov',isOut=st.type==='out';
+  $('outFields').classList.toggle('hidden',!isOut);$('inFields').classList.toggle('hidden',!isIn);$('movFields').classList.toggle('hidden',!isMov);
   document.querySelectorAll('#typeSel button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.t===st.type));
-  $('addBtn').textContent=isIn?'Guardar ingreso':'Guardar gasto';
-  $('store').placeholder=isIn?'De dónde (nómina, Bizum, venta…)':'Dónde (Mercadona, BP…)';
-  if(isIn)return;
+  document.querySelectorAll('#destSel button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.dest===st.dest));
+  document.querySelectorAll('#dirSel button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.dir===st.dir));
+  const sv=savings().total;
+  $('destHelp').textContent=st.dest==='ahorro'?`Va directo a tu hucha de ahorros (ahora tienes ${money(sv)}). No sube lo que puedes gastar.`:'Se suma a lo que puedes gastar este mes y sube tu margen de cada día.';
+  $('dirHelp').textContent=st.dir==='out'?`Pasas dinero de la cuenta a tus ahorros (ahora tienes ${money(sv)}). Baja lo que puedes gastar este mes.`:`Sacas dinero de tus ahorros (tienes ${money(sv)}) para gastarlo este mes. Sube tu margen.`;
+  $('addBtn').textContent=isIn?(st.dest==='ahorro'?'Guardar en ahorros':'Guardar ingreso'):isMov?(st.dir==='out'?'Meter en ahorros':'Sacar de ahorros'):'Guardar gasto';
+  $('store').placeholder=isIn?'De dónde (herencia, Bizum, venta…)':isMov?'Nota (opcional): para el viaje…':'Dónde (Mercadona, BP…)';
+  if(!isOut)return;
   const u=usage(),ord=CATS.slice().sort((a,b)=>(u[b.k]||0)-(u[a.k]||0));
   let shown=st.moreCats?ord:ord.slice(0,8);
   if(!shown.find(k=>k.k===st.cat))shown=[...shown,CAT[st.cat]];
@@ -419,10 +438,10 @@ function renderMes(){
   $('sum').innerHTML=`<div class="main"><small>${c.status==='past'?'Ahorrado':'Te queda para gastar'}</small><b class="num">${money(c.status==='past'?c.saved:c.left)}</b></div>
    <div><small>Ingresos</small><b class="num">${money(c.income)}</b></div><div><small>Fijos</small><b class="num">${money(c.fixedOnly)}</b></div>
    <div><small>Pagos a plazos</small><b class="num">${money(c.plz)}</b></div><div><small>Ahorro objetivo</small><b class="num">${money(c.goal)}</b></div>
-   <div style="grid-column:1/-1"><small>Gastado en el día a día</small><b class="num">${money(c.spent)}</b></div>`;
+   <div><small>Gastado en el día a día</small><b class="num">${money(c.spent)}</b></div><div><small>Tus ahorros</small><b class="num">${money(savings().total)}</b></div>${c.movOut||c.movIn||c.deposits?`<div style="grid-column:1/-1"><small>Movimientos de ahorros este mes</small><b class="num" style="font-size:16px">${c.deposits?'+'+money(c.deposits)+' ingresado · ':''}${c.movOut?'+'+money(c.movOut)+' pasado · ':''}${c.movIn?'−'+money(c.movIn)+' sacado':''}</b></div>`:''}`;
   let proj='';
   if(c.status==='now'&&c.d-c.first>=2&&c.spent>0){
-    const end=c.spent/(c.d-c.first+1)*(c.D-c.first+1),save=c.income-c.fixed-end;
+    const end=c.spent/(c.d-c.first+1)*(c.D-c.first+1),save=c.income-c.fixed-c.movOut-end;
     proj=`A este ritmo gastarás unos <b>${eur0.format(end)}</b> este mes y ahorrarás <b>${eur0.format(save)}</b>. `+(save>=c.goal?'Llegas a tu objetivo.':`Te faltarían ${eur0.format(c.goal-save)} para tu objetivo: intenta no pasar de ${eur0.format(Math.max(c.allow,0))} al día.`);
   }else if(c.status==='now')proj='En unos días podré decirte cómo acabarás el mes a este ritmo.';
   $('proj').innerHTML=proj;
@@ -486,7 +505,9 @@ function renderHist(){
     const pct=c.goal>0?Math.max(0,Math.min(val/c.goal*100,100)):(val>0?100:0),ok=val>=c.goal;
     return `<div class="r"><span class="m">${mName(k)}</span><div class="bar"><i style="width:${pct}%;background:${ok?'var(--ok)':c.status==='now'?'var(--warn)':'var(--bad)'}"></i></div><span class="num"><b>${eur0.format(val)}</b>${c.status==='now'?' <small style="color:var(--dim)">(en curso)</small>':''}</span></div>`}).join('');
   $('histRows').innerHTML=rows||'<p class="empty">Aquí irán tus meses en cuanto anotes algo.</p>';
-  $('histSum').innerHTML=`<div class="main"><small>Ahorrado en meses cerrados</small><b class="num">${money(tot)}</b></div><div><small>Meses cerrados</small><b>${past}</b></div><div><small>Objetivo cumplido</small><b>${okN} de ${past}</b></div>`;
+  const sv=savings(),cm=calc(curMk());
+  $('histSum').innerHTML=`<div class="main"><small>Tienes ahorrado</small><b class="num">${money(sv.total)}</b></div><div><small>Lo que tenías</small><b class="num">${money(sv.ini)}</b></div><div><small>Sobrante de meses cerrados</small><b class="num">${money(sv.past)}</b></div><div><small>Metido y sacado a mano</small><b class="num">${money(sv.direct)}</b></div><div><small>Objetivo cumplido</small><b>${okN} de ${past} meses</b></div>`;
+  $('histHelp').textContent=`Lo que te sobre de ${mName(curMk()).toLowerCase()} se sumará al cerrar el mes${cm.goal?` (tu objetivo: ${money(cm.goal)})`:''}. Para meter o sacar dinero de los ahorros, usa Anotar → Ahorros.`;
 }
 
 /* ---- Ajustes ---- */
@@ -512,7 +533,7 @@ function readPlz(root,s){
 }
 function renderAj(){
   const s=st.settings;
-  $('ajIncome').value=fmtIn(s.income);$('ajSave').value=fmtIn(s.save);
+  $('ajIncome').value=fmtIn(s.income);$('ajSave').value=fmtIn(s.save);$('ajIni').value=fmtIn(s.ahorroIni);
   $('fixedList').innerHTML=(s.fixed||[]).map((f,i)=>`<div class="fx" data-fk="${esc(f.k||'')}"><input class="inp" data-fn="${i}" value="${esc(f.n||'')}" placeholder="Alquiler" aria-label="Nombre del gasto fijo"><input class="inp num" data-fa="${i}" inputmode="decimal" value="${fmtIn(f.a)}" placeholder="0" aria-label="Importe"><button class="del" data-fx="${i}" aria-label="Quitar">✕</button></div>`).join('')||'<p class="empty">Sin gastos fijos todavía.</p>';
   $('plzEdit').innerHTML=plzEditor(s.plazos);
   $('budList').innerHTML=CATS.map(k=>`<div class="bud"><span><i class="dot" style="background:${k.c}"></i>${k.n}</span><input class="inp num" data-bud="${k.k}" inputmode="decimal" placeholder="Sin límite" value="${s.budgets&&s.budgets[k.k]?fmtIn(s.budgets[k.k]):''}" aria-label="Límite ${k.n}"></div>`).join('');
@@ -520,7 +541,7 @@ function renderAj(){
 }
 function readAj(){
   const s=st.settings;
-  s.income=parseAmt($('ajIncome').value)||0;s.save=parseAmt($('ajSave').value)||0;
+  s.income=parseAmt($('ajIncome').value)||0;s.save=parseAmt($('ajSave').value)||0;s.ahorroIni=parseAmt($('ajIni').value)||0;
   s.fixed=[...document.querySelectorAll('#fixedList .fx')].map(row=>({k:row.dataset.fk||undefined,n:row.querySelector('[data-fn]').value.trim(),a:parseAmt(row.querySelector('[data-fa]').value)||0})).filter(f=>f.n||f.a);
   readPlz($('plzEdit'),s);
   s.budgets={};document.querySelectorAll('[data-bud]').forEach(el=>{const v=parseAmt(el.value);if(v>0)s.budgets[el.dataset.bud]=v});
@@ -623,10 +644,13 @@ function showTip(html,kind){$('tipTxt').innerHTML=html;$('tip').className='card 
 function add(){
   const a=parseAmt($('amt').value);
   if(!(a>0)){$('amt').focus();toast('Pon una cantidad');return}
-  const d=$('date').value||todayISO(),mk=mkOf(d),isOut=st.type==='out';
+  const d=$('date').value||todayISO(),mk=mkOf(d),isOut=st.type==='out',isMov=st.type==='mov';
+  if(isMov&&st.dir==='in'&&a>savings().total+0.005){toast('No tienes tanto en ahorros ('+money(savings().total)+')');return}
   const p=isOut?$('prod').value.trim():'',q=isOut?parseAmt($('qty').value):NaN,s=$('store').value.trim();
-  const it={id:uid(),t:st.type,a,c:isOut?st.cat:'ingreso',d};
-  if(p)it.p=p;if(q>0)it.q=q;if(s)it.s=s;
+  const it={id:uid(),t:st.type,a,c:isOut?st.cat:isMov?'ahorro':'ingreso',d};
+  if(p)it.p=p;if(q>0)it.q=q;
+  if(isMov){it.dir=st.dir;if(s)it.n=s}else if(s)it.s=s;
+  if(st.type==='in'&&st.dest==='ahorro')it.to='ahorro';
   // comparar precio antes de guardar
   let tip=null;
   if(p){
@@ -641,7 +665,7 @@ function add(){
   saveMonth(mk);
   $('amt').value='';$('prod').value='';$('qty').value='';$('store').value='';$('pHint').textContent='';$('date').value=todayISO();
   if(tip)showTip(tip[0],tip[1]);else $('tip').classList.add('hidden');
-  toast((isOut?'Gasto de ':'Ingreso de ')+money(a)+' guardado');
+  toast(isMov?(st.dir==='out'?money(a)+' a tus ahorros':money(a)+' sacados de ahorros'):(isOut?'Gasto de ':it.to==='ahorro'?'Ahorro de ':'Ingreso de ')+money(a)+' guardado');
   if(mk!==st.mk)st.mk=mk;
   renderAll();renderCatSel();
 }
@@ -654,6 +678,8 @@ document.addEventListener('click',e=>{
   const t=e.target.closest('button');if(!t||t.closest('#wz'))return;
   if(t.dataset.tab)setTab(t.dataset.tab);
   else if(t.dataset.t){st.type=t.dataset.t;renderCatSel()}
+  else if(t.dataset.dest){st.dest=t.dataset.dest;renderCatSel()}
+  else if(t.dataset.dir){st.dir=t.dataset.dir;renderCatSel()}
   else if(t.dataset.cat){st.cat=t.dataset.cat;renderCatSel()}
   else if(t.id==='moreCats'){st.moreCats=!st.moreCats;renderCatSel()}
   else if(t.dataset.id)delItem(t.dataset.id,t);
