@@ -27,7 +27,7 @@ jobs:
           mkdir -p www && cp ../index.html ../icono.png www/
           npm install --no-audit --no-fund
           npx cap add android
-          npx capacitor-assets generate --android --iconBackgroundColor '#0b5a43' --iconBackgroundColorDark '#0b5a43' --splashBackgroundColor '#0b5a43' --splashBackgroundColorDark '#0b5a43'
+          npx capacitor-assets generate --android --iconBackgroundColor '#0d0a22' --iconBackgroundColorDark '#0d0a22' --splashBackgroundColor '#0d0a22' --splashBackgroundColorDark '#0d0a22'
           npx cap sync android
           sed -i "s/versionCode 1$/versionCode ${{ github.run_number }}/; s/versionName \"1.0\"/versionName \"1.${{ github.run_number }}\"/" android/app/build.gradle
           grep -n "versionCode\|versionName" android/app/build.gradle
