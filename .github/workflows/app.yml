@@ -1,0 +1,70 @@
+name: App Android
+# Compila el APK de La Hucha con la app dentro (funciona sin internet; los datos se quedan en el móvil).
+# Se lanza solo con cada cambio de la app, o a mano desde la pestaña Actions.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["index.html", "icono.png", "app/**", ".github/workflows/app.yml"]
+permissions:
+  contents: write
+concurrency:
+  group: app
+  cancel-in-progress: true
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "21" }
+
+      - name: Proyecto Android
+        run: |
+          cd app
+          mkdir -p www && cp ../index.html ../icono.png www/
+          npm install --no-audit --no-fund
+          npx cap add android
+          npx capacitor-assets generate --android --iconBackgroundColor '#0b5a43' --iconBackgroundColorDark '#0b5a43' --splashBackgroundColor '#0b5a43' --splashBackgroundColorDark '#0b5a43'
+          npx cap sync android
+          sed -i "s/versionCode 1$/versionCode ${{ github.run_number }}/; s/versionName \"1.0\"/versionName \"1.${{ github.run_number }}\"/" android/app/build.gradle
+          grep -n "versionCode\|versionName" android/app/build.gradle
+
+      - name: Compilar
+        run: cd app/android && chmod +x gradlew && ./gradlew assembleRelease --no-daemon -q
+
+      - name: Firmar
+        env:
+          CLAVE: ${{ secrets.APK_CLAVE }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -z "$CLAVE" ]; then echo "::error::Falta el secreto APK_CLAVE (Settings > Secrets and variables > Actions)"; exit 1; fi
+          # La firma se crea una vez y se guarda cifrada con APK_CLAVE en la rama "firma":
+          # siempre la misma, para que cada versión nueva se instale encima sin borrar tus datos.
+          if git fetch -q origin firma 2>/dev/null && git show FETCH_HEAD:firma.jks.enc > firma.jks.enc 2>/dev/null && [ -s firma.jks.enc ]; then
+            openssl enc -d -aes-256-cbc -pbkdf2 -in firma.jks.enc -out firma.jks -pass env:CLAVE
+          else
+            keytool -genkeypair -keystore firma.jks -alias hucha -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "$CLAVE" -keypass "$CLAVE" -dname "CN=La Hucha, O=La Hucha, C=ES"
+            openssl enc -aes-256-cbc -pbkdf2 -salt -in firma.jks -out firma.jks.enc -pass env:CLAVE
+            mkdir rama && cp firma.jks.enc rama/ && cd rama && git init -q && git checkout -q -b firma
+            git config user.name bot && git config user.email bot@local
+            git add firma.jks.enc && git commit -qm "firma de la app (cifrada)"
+            git push -q "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" firma
+            cd ..
+          fi
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/zipalign" -p -f 4 app/android/app/build/outputs/apk/release/app-release-unsigned.apk alineada.apk
+          "$BT/apksigner" sign --ks firma.jks --ks-pass env:CLAVE --ks-key-alias hucha --key-pass env:CLAVE --out LaHucha.apk alineada.apk
+          "$BT/apksigner" verify LaHucha.apk && ls -la LaHucha.apk
+          rm -f firma.jks
+
+      - name: Publicar la descarga
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view app >/dev/null 2>&1 || gh release create app --title "App Android" --notes "La Hucha para Android." --prerelease
+          gh release upload app LaHucha.apk --clobber
+          gh release edit app --notes "La Hucha para Android · versión 1.${{ github.run_number }}. Descarga LaHucha.apk e instálala (encima de la anterior, sin perder tus datos)."
